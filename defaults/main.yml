@@ -13,7 +13,7 @@ droplet_region_id: sgp1
 # This is the slug of the size you would like the droplet to be created with.
 droplet_size_id: 512mb
 # This is the slug of the image you would like the droplet to be created with.
-droplet_image_id: ubuntu-18-04-x64
+droplet_image_id: ubuntu-20-04-x64
 
 # Location of your ansible inventory file
 ansible_inventory_file: hosts
@@ -22,7 +22,11 @@ droplets_inventory_group: do_droplets
 
 ansible_user_id: "{{ ansible_env.SUDO_USER }}"
 
-pip_packages:
-  - name: dopy
-    version: 0.3.5
-  - name: six
+droplet_unique_name: yes
+droplet_wait_timeout: 600
+droplet_tags:
+  - "{{ env }}"
+droplet_user_data: |
+  #cloud-config
+  runcmd:
+    - /usr/sbin/ufw disable

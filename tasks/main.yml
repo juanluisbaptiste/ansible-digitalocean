@@ -14,85 +14,42 @@
 - import_tasks: centos.yml
   when: ansible_os_family == 'RedHat'
 
-- name: Install six
+- name: Install pip packages
   pip:
-    name: six
-  environment:
-    PATH: /usr/local/bin:{{ ansible_env.PATH }}
+    name: [six,dopy]
 
-- name: Install dopy
-  pip:
-    name: dopy
-    version: 0.3.5
-  environment:
-    PATH: /usr/local/bin:{{ ansible_env.PATH }}
-
-- name: Register SSH key
-  digital_ocean:
-    state: present
-    command: ssh
+- name: "Create ssh key"
+  digital_ocean_sshkey:
+    oauth_token: "{{ do_api_token }}"
     name: "{{ do_ssh_key_name }}"
     ssh_pub_key: "{{ do_ssh_pub_key }}"
-    api_token: "{{ do_api_token }}"
-  register: droplet
-  ignore_errors: yes
-  environment:
-    PATH: /usr/local/bin:{{ ansible_env.PATH }}
-  tags: add_ssh_key
+    state: present
+  register: ssh_key
+  when: do_ssh_key_name is defined and do_ssh_pub_key is defined
+
+- debug: "msg={{ ssh_key }}"
 
 - name: Create droplet
-  digital_ocean:
-    state: active
-    command: droplet
+  digital_ocean_droplet:
+    state: present
     name: "{{ droplet_name }}"
-    region_id: "{{ droplet_region_id }}"
-    size_id: "{{ droplet_size_id }}"
-    image_id: "{{ droplet_image_id }}"
-    ssh_key_ids: "{{ droplet_additional_ssh_key_ids }} + [ '{{ droplet.ssh_key.id }}' ]"
-    unique_name: yes
-    api_token: "{{ do_api_token }}"
-    wait_timeout: 600
+    oauth_token: "{{ do_api_token }}"
+    size: "{{ droplet_size_id }}"
+    region: "{{ droplet_region_id }}"
+    image: "{{ droplet_image_id }}"
+    ssh_keys: "{{ droplet_additional_ssh_key_ids | default([]) }} + [ '{{ ssh_key.data.ssh_key.id }}' ]"
+    tags: "{{ droplet_tags | default('') }}"
+    user_data: "{{ droplet_user_data | default('') }}"
+    unique_name: "{{ droplet_unique_name }}"
+    wait_timeout: "{{ droplet_wait_timeout }}"
   register: droplet
   tags: create_droplet
 
-- debug: msg="Droplet IP is {{ droplet.droplet.ip_address }}"
+- debug: msg="Droplet IP is {{ droplet.data.droplet.networks.v4[1].ip_address }}"
+  register: droplet_ip_address
   tags: create_droplet
 
-- name: Create inventory in memory
-  add_host:
-    name: "{{ droplet_name }}"
-    groups: do_droplet_in_memory
-    ansible_ssh_host: "{{ droplet.droplet.ip_address }}"
-    ansible_ssh_user: root
-    ansible_ssh_private_key_file: "{{ do_ssh_private_key }}"
-  changed_when: false
-  tags: create_droplet
+- debug: msg="{{ ansible_user_id }}"
+- name: Run the Template
+  template: src=inventory.j2 dest={{ ansible_inventory_file }} owner={{ ansible_user_id }} group={{ ansible_user_id }} mode=0644
 
-- name: Check if droplets inventory group exists in inventory file
-  shell: grep -x \[{{ droplets_inventory_group }}\] {{ ansible_inventory_file }}
-  register: inventory_group
-  tags: inventory_file
-  failed_when: inventory_group.rc == 2
-  changed_when: inventory_group.rc == 0
-  when: ansible_inventory_file|length > 0
-
-- name: Add inventory group to inventory file
-  become: no
-  lineinfile:
-    dest: "{{ ansible_inventory_file }}"
-    line: "[{{ droplets_inventory_group }}]"
-    state: present
-  tags: inventory_file
-  when: ansible_inventory_file|length > 0 and inventory_group.rc == 1
-
-- name: Add droplet to inventory file
-  become: no
-  lineinfile:
-    dest: "{{ ansible_inventory_file }}"
-    regexp: "{{ droplet.droplet.ip_address }}"
-    insertafter: ^\[{{ droplets_inventory_group }}\]
-    state: present
-    line: "{{ droplet_name }} ansible_host={{ droplet.droplet.ip_address }}"
-  delegate_to: localhost
-  when: ansible_inventory_file|length > 0
-  tags: inventory_file
